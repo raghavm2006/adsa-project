@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forgot Password</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="wrapper">
+        <form action="/forgot_password" method="POST">
+            <h1>Forgot Password</h1>
+            <div class="input-box">
+                <input type="email" name="email" placeholder="Enter your email" required>
+            </div>
+            <button type="submit" class="btn">Send Reset Link</button>
+            <div class="register-link">
+                <p>Remember your password? <a href="{{ url_for('login') }}">Login</a></p>
+                <p>Received an OTP link? <a href="{{ url_for('reset_password') }}">Reset Password</a></p>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
