@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Prediction</title>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-compass/1.1.2/leaflet-compass.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-compass/1.1.2/leaflet-compass.min.css" />
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .header {
+            background-color: #1a73e8;
+            color: white;
+            text-align: center;
+            padding: 1.5rem;
+            font-size: 1.8rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .input-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .input-row input {
+            padding: 10px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        .input-row button {
+            padding: 10px 20px;
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s;
+        }
+        .input-row button:hover {
+            background-color: #1557b0;
+        }
+        .transport-options {
+            margin: 15px 0;
+            text-align: center;
+        }
+        .transport-options label {
+            margin: 0 15px;
+            font-size: 1.1rem;
+        }
+        .transport-options input[type="radio"] {
+            margin-right: 5px;
+        }
+        .waypoints {
+            margin: 15px 0;
+            text-align: center;
+        }
+        .waypoint-item {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 5px 0;
+        }
+        .waypoint-item input {
+            padding: 8px;
+            width: 70%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        .waypoint-item button {
+            padding: 5px 10px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+        .waypoint-item button:hover {
+            background-color: #d32f2f;
+        }
+        .waypoints button.add {
+            padding: 8px 15px;
+            background-color: #34a853;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s;
+        }
+        .waypoints button.add:hover {
+            background-color: #2e8b3d;
+        }
+        #map {
+            height: 600px;
+            width: 100%;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        .custom-source-icon {
+            background: radial-gradient(circle, #4285f4 30%, transparent 70%);
+            border: 2px solid #4285f4;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        .custom-waypoint-icon {
+            background: radial-gradient(circle, #34a853 30%, transparent 70%);
+            border: 2px solid #34a853;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            z-index: 900;
+        }
+        #traffic-delay {
+            margin-top: 10px;
+            text-align: center;
+            font-size: 1.1rem;
+            color: #555;
+        }
+    </style>
+    <script>
+        let lastCenter = JSON.parse(localStorage.getItem("lastCenter")) || [0, 0];
+        let lastZoom = parseInt(localStorage.getItem("lastZoom"), 10) || 13;
+        let previousZoom = lastZoom; // Store the zoom level before reload
+        let lastPositionBeforeReload = lastCenter; // Store the position before reload
+        let lat, lng, destination, transportMode = "car", waypoints = [];
+        let map = null;
+        let waypointMarkers = [];
+        let isReloadUpdate = false; // Flag to track if update is from reload
+        let isFetchingRoute = false; // Flag to prevent overlapping route fetches
+        let reloadIntervalId = null; // Store the interval ID to control reloads
+
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        lat = position.coords.latitude;
+                        lng = position.coords.longitude;
+                        document.getElementById("source").value = "Current Location";
+                        console.log("Initial location:", lat, lng);
+
+                        if (lastCenter[0] === 0 && lastCenter[1] === 0) {
+                            lastCenter = [lat, lng];
+                            localStorage.setItem("lastCenter", JSON.stringify(lastCenter));
+                        }
+                        initializeMap();
+                    },
+                    (error) => {
+                        alert("Error getting location. Please enter source manually.");
+                        document.getElementById("source").value = "";
+                        console.error("Geolocation error:", error);
+                        initializeMap();
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                );
+            } else {
+                alert("Geolocation is not supported by this browser.");
+                initializeMap();
+            }
+        }
+
+        function initializeMap() {
+            if (map) return;
+
+            const initialCenter = (lastCenter[0] !== 0 || lastCenter[1] !== 0) ? lastCenter : (lat && lng) ? [lat, lng] : [0, 0];
+            map = L.map('map').setView(initialCenter, lastZoom);
+            console.log("Map initialized with center:", initialCenter, "zoom:", lastZoom);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+
+            L.control.compass({ autoActive: true, showDigit: true }).addTo(map);
+
+            map.on('moveend zoomend', () => {
+                lastCenter = [map.getCenter().lat, map.getCenter().lng];
+                lastZoom = map.getZoom();
+                localStorage.setItem("lastCenter", JSON.stringify(lastCenter));
+                localStorage.setItem("lastZoom", lastZoom.toString());
+                console.log("Updated lastCenter:", lastCenter, "lastZoom:", lastZoom);
+            });
+
+            if (destination) {
+                fetchRoute();
+            }
+        }
+
+        function getRoute() {
+            destination = document.getElementById("destination").value;
+            if (!destination) {
+                alert("Please enter a destination.");
+                return;
+            }
+            isReloadUpdate = false; // Manual route fetch, not a reload
+            fetchRoute();
+        }
+
+        function addWaypoint() {
+            const waypointContainer = document.querySelector(".waypoints");
+            const waypointItem = document.createElement("div");
+            waypointItem.className = "waypoint-item";
+            waypointItem.innerHTML = `
+                <input type="text" placeholder="Enter Waypoint" class="waypoint-input">
+                <button onclick="removeWaypoint(this)">Remove</button>
+            `;
+            waypointContainer.insertBefore(waypointItem, waypointContainer.lastElementChild);
+        }
+
+        function removeWaypoint(button) {
+            button.parentElement.remove();
+            waypoints = Array.from(document.querySelectorAll(".waypoint-input")).map(input => input.value.trim()).filter(w => w);
+            clearWaypointMarkers();
+            if (destination) fetchRoute();
+        }
+
+        function clearWaypointMarkers() {
+            waypointMarkers.forEach(marker => map.removeLayer(marker));
+            waypointMarkers = [];
+        }
+
+        async function fetchWaypointCoordinates() {
+            clearWaypointMarkers();
+
+            for (let index = 0; index < waypoints.length; index++) {
+                const waypoint = waypoints[index];
+                if (!waypoint) {
+                    console.warn(`Waypoint ${index + 1} is empty, skipping.`);
+                    continue;
+                }
+
+                try {
+                    const response = await fetchWithTimeout(
+                        `https://geocode.search.hereapi.com/v1/geocode?q=${encodeURIComponent(waypoint)}&apiKey=vfkEAl_HJiKREUeiUk83zPdt3EotBKqCW_v1kOrvwdw`,
+                        { timeout: 10000 }
+                    );
+                    if (!response.ok) {
+                        throw new Error(`Geocoding API returned status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    if (data.items && data.items.length > 0) {
+                        const lat = data.items[0].position.lat;
+                        const lng = data.items[0].position.lng;
+                        const marker = L.marker([lat, lng], {
+                            icon: L.divIcon({
+                                className: 'custom-waypoint-icon',
+                                iconSize: [16, 16],
+                                iconAnchor: [8, 8]
+                            })
+                        }).bindPopup(`Waypoint ${index + 1}: ${waypoint}`).addTo(map);
+                        waypointMarkers.push(marker);
+                        console.log(`Waypoint ${index + 1} marker set at: [${lat}, ${lng}]`);
+                    } else {
+                        console.error(`No geocoding results for waypoint: ${waypoint}`);
+                        alert(`Failed to geocode waypoint ${index + 1}: ${waypoint}. Please check the location name.`);
+                    }
+                } catch (error) {
+                    console.error(`Error geocoding waypoint ${waypoint}:`, error);
+                    alert(`Error geocoding waypoint ${index + 1}: ${waypoint}. Please try again. (${error.message})`);
+                }
+            }
+        }
+
+        // Helper function to add timeout to fetch requests
+        async function fetchWithTimeout(url, options = {}) {
+            const { timeout = 30000 } = options; // Default timeout of 30 seconds
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                if (error.name === 'AbortError') {
+                    throw new Error(`Request timed out after ${timeout / 1000} seconds`);
+                }
+                throw error;
+            }
+        }
+
+        async function fetchRoute() {
+            if (!lat || !lng || !destination || isFetchingRoute) {
+                console.log("Skipping fetchRoute: Missing lat, lng, or destination, or fetch in progress");
+                return;
+            }
+            isFetchingRoute = true; // Prevent overlapping fetches
+
+            waypoints = Array.from(document.querySelectorAll(".waypoint-input")).map(input => input.value.trim()).filter(w => w);
+            console.log("Fetching route with source:", [lat, lng], "destination:", destination, "waypoints:", waypoints);
+
+            try {
+                const response = await fetchWithTimeout("/route", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        source: [lat, lng],
+                        destination,
+                        waypoints,
+                        last_center: lastCenter,
+                        last_zoom: lastZoom,
+                        transportMode: transportMode
+                    }),
+                    timeout: 30000
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`Backend error: ${errorData.error || response.statusText}`);
+                }
+
+                const data = await response.json();
+                if (data.geojson) {
+                    console.log("Received GeoJSON: Valid data received");
+                    updateMap(data.geojson);
+                    await fetchWaypointCoordinates();
+                } else {
+                    console.error("Error from backend:", data.error);
+                    alert(`Error from backend: ${data.error || "Unknown error"}`);
+                }
+            } catch (error) {
+                console.error("Fetch route error:", error);
+                alert(`Failed to fetch route: ${error.message}. Please try again.`);
+            } finally {
+                isFetchingRoute = false; // Allow next fetch
+
+                // Restart the reload interval after fetch completes
+                if (reloadIntervalId) {
+                    clearInterval(reloadIntervalId);
+                }
+                reloadIntervalId = setInterval(updateUserLocationAndRoute, 15000); // 15-second interval
+                console.log("Reload interval restarted with 15-second delay");
+            }
+        }
+
+        function updateMap(geojson) {
+            if (!map) {
+                console.error("Map not initialized");
+                return;
+            }
+
+            console.log("Updating map with GeoJSON: Valid data processed");
+
+            if (!geojson.features || !geojson.features.length || !geojson.features[0].geometry?.coordinates?.length) {
+                console.error("Invalid GeoJSON: No coordinates to render");
+                alert("No route found to display on the map. Check the destination or waypoints.");
+                return;
+            }
+
+            if (window.routeLayer) {
+                map.removeLayer(window.routeLayer);
+            }
+
+            window.routeLayer = L.geoJSON(geojson, {
+                style: { color: "#42a5f5", weight: 6, opacity: 0.9 }
+            }).addTo(map);
+            console.log("Route layer added to map");
+
+            if (!window.sourceMarker) {
+                window.sourceMarker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        className: 'custom-source-icon',
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    })
+                }).bindPopup("Current Location").addTo(map);
+            } else {
+                window.sourceMarker.setLatLng([lat, lng]);
+            }
+            console.log("Source marker set at:", [lat, lng]);
+
+            let destCoords;
+            if (!window.destMarker && geojson.features.length > 0) {
+                destCoords = geojson.features[0].geometry.coordinates[geojson.features[0].geometry.coordinates.length - 1];
+                window.destMarker = L.marker([destCoords[1], destCoords[0]], {
+                    icon: L.icon({
+                        iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41]
+                    })
+                }).bindPopup("Destination").addTo(map);
+            } else if (window.destMarker && geojson.features.length > 0) {
+                destCoords = geojson.features[0].geometry.coordinates[geojson.features[0].geometry.coordinates.length - 1];
+                window.destMarker.setLatLng([destCoords[1], destCoords[0]]);
+            }
+            if (destCoords) {
+                console.log("Destination marker set/updated at:", [destCoords[1], destCoords[0]]);
+            }
+
+            const trafficDelayDiv = document.getElementById("traffic-delay");
+            if (geojson.features[0].properties && geojson.features[0].properties.traffic_category) {
+                trafficDelayDiv.textContent = `Traffic Condition: ${geojson.features[0].properties.traffic_category}`;
+                console.log("Traffic category displayed:", geojson.features[0].properties.traffic_category);
+            } else {
+                trafficDelayDiv.textContent = "No traffic data available.";
+                console.log("No traffic category in GeoJSON");
+            }
+
+            const centerToUse = isReloadUpdate ? lastPositionBeforeReload : lastCenter;
+            const zoomToUse = isReloadUpdate ? previousZoom : lastZoom;
+            map.setView(centerToUse, zoomToUse);
+            console.log("Map set to view:", centerToUse, "zoom:", zoomToUse, "isReloadUpdate:", isReloadUpdate);
+        }
+
+        function updateUserLocationAndRoute() {
+            if (navigator.geolocation && !isFetchingRoute) {
+                lastPositionBeforeReload = [map.getCenter().lat, map.getCenter().lng];
+                previousZoom = map.getZoom();
+                console.log("Stored lastPositionBeforeReload:", lastPositionBeforeReload, "previousZoom:", previousZoom);
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        lat = position.coords.latitude;
+                        lng = position.coords.longitude;
+                        document.getElementById("source").value = "Current Location";
+                        console.log("Updated location:", lat, lng);
+
+                        if (window.sourceMarker) {
+                            window.sourceMarker.setLatLng([lat, lng]);
+                            console.log("Source marker updated to:", [lat, lng]);
+                        }
+
+                        if (destination) {
+                            isReloadUpdate = true;
+                            fetchRoute();
+                        }
+                    },
+                    (error) => {
+                        console.log("Location update error:", error);
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                );
+            } else {
+                console.log("Skipping reload: Fetch in progress or geolocation unavailable");
+            }
+        }
+
+        function setTransportMode(mode) {
+            transportMode = mode;
+            console.log("Transport mode set to:", transportMode);
+            if (destination) {
+                isReloadUpdate = false;
+                fetchRoute();
+            }
+        }
+
+        window.onload = () => {
+            getCurrentLocation();
+            console.log("Initial lastCenter from localStorage:", lastCenter, "lastZoom:", lastZoom);
+            reloadIntervalId = setInterval(updateUserLocationAndRoute, 15000);
+        };
+    </script>
+</head>
+<body>
+    <div class="header">Traffic Prediction</div>
+    <div class="container">
+        <div class="input-group">
+            <div class="input-row">
+                <input type="text" id="source" placeholder="Enter Source or Use Current Location" readonly>
+                <button onclick="getCurrentLocation()">Use Current Location</button>
+            </div>
+            <div class="input-row">
+                <input type="text" id="destination" placeholder="Enter Destination">
+                <button onclick="getRoute()">Find Route</button>
+            </div>
+        </div>
+        <div class="transport-options">
+            <label><input type="radio" name="transport" value="car" checked onclick="setTransportMode('car')"> Car</label>
+            <label><input type="radio" name="transport" value="bicycle" onclick="setTransportMode('bicycle')"> Bike</label>
+            <label><input type="radio" name="transport" value="truck" onclick="setTransportMode('truck')"> Truck</label>
+        </div>
+        <div class="waypoints">
+            <button class="add" onclick="addWaypoint()">Add Waypoint</button>
+        </div>
+        <div id="traffic-delay">No traffic data available.</div>
+        <div id="map"></div>
+    </body>
+</html>
